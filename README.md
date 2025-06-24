@@ -24,6 +24,19 @@ A web-based system that allows **Passengers**, **Drivers**, and **Admins** to in
 - Admin-only login & control panel
 
 ---
+## 🛠️ Tech Stack
 
-## 📁 File Structure
+| Layer        | Tech Used               |
+|--------------|--------------------------|
+| Frontend     | HTML, CSS, JavaScript, Leaflet.js |
+| Backend      | PHP                      |
+| Database     | MySQL                    |
+| Hosting      | GitHub Pages / Localhost |
+| Maps         | Leaflet.js + OSRM API (optional) |
+
+---
+
+
+
+
 
