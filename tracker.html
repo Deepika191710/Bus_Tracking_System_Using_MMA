@@ -1,0 +1,171 @@
+<!-- tracker.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bus Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f4f9;
+      padding: 20px;
+      color: #333;
+    }
+    h2, h3 {
+      text-align: center;
+      color: #2c3e50;
+    }
+    #map {
+      height: 300px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    label, select, input, button {
+      margin: 10px auto;
+      display: block;
+      width: 100%;
+      max-width: 400px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      box-sizing: border-box;
+    }
+    button {
+      background-color: #3498db;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #2980b9;
+    }
+    .status {
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Live Bus Location Tracker</h2>
+
+  <label for="source">Select Source:</label>
+  <select id="source" onchange="loadDestinations()"></select>
+
+  <label for="destination">Select Destination:</label>
+  <select id="destination" onchange="loadBuses()"></select>
+
+  <label for="bus_id">Select Bus:</label>
+  <select id="bus_id"></select>
+
+  <button onclick="startTracking()">Start Tracking</button>
+  <button onclick="stopTracking()">Stop Tracking</button>
+
+  <div id="map"></div>
+  <p class="status" id="statusMsg"></p>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    let tracking = false;
+    let watchId = null;
+    let currentBusId = null;
+
+    async function fetchJSON(url) {
+      const res = await fetch(url);
+      return await res.json();
+    }
+
+    async function loadSources() {
+      const stops = await fetchJSON('get_stops_list.php');
+      const sourceSelect = document.getElementById('source');
+      sourceSelect.innerHTML = '<option value="">Select Source</option>';
+      stops.forEach(s => {
+        sourceSelect.innerHTML += `<option value="${s.stop_id}">${s.stop_name}</option>`;
+      });
+    }
+
+    async function loadDestinations() {
+      const sourceId = document.getElementById('source').value;
+      const stops = await fetchJSON(`get_destinations.php?source_id=${sourceId}`);
+      const destSelect = document.getElementById('destination');
+      destSelect.innerHTML = '<option value="">Select Destination</option>';
+      stops.forEach(s => {
+        destSelect.innerHTML += `<option value="${s.stop_id}">${s.stop_name}</option>`;
+      });
+    }
+
+    async function loadBuses() {
+      const source = document.getElementById('source').value;
+      const destination = document.getElementById('destination').value;
+      const buses = await fetchJSON(`get_buses.php?source_id=${source}&destination_id=${destination}`);
+      const busSelect = document.getElementById('bus_id');
+      busSelect.innerHTML = '<option value="">Select Bus</option>';
+      buses.forEach(bus => {
+        busSelect.innerHTML += `<option value="${bus.bus_id}">${bus.bus_name}</option>`;
+      });
+    }
+
+    function startTracking() {
+      const busId = document.getElementById("bus_id").value;
+      if (!busId) return alert("Please select a bus");
+
+      currentBusId = busId;
+      document.getElementById("statusMsg").textContent = "Tracking started...";
+
+     function getLocationAndSend() {
+  if (!navigator.geolocation) {
+    alert("Geolocation is not supported by your browser");
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(position => {
+    const lat = position.coords.latitude;
+    const lng = position.coords.longitude;
+    const busId = document.getElementById("bus_id").value;
+
+    fetch("save_location.php", {
+      method: "POST",
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: `lat=${lat}&lng=${lng}&bus_id=${busId}`
+    }).then(response => response.text())
+      .then(data => console.log("Location saved:", data))
+      .catch(err => console.error("Error saving location:", err));
+
+  }, error => {
+    alert("Error getting location: " + error.message);
+  });
+}
+
+
+      watchId = navigator.geolocation.watchPosition(position => {
+        const { latitude, longitude } = position.coords;
+        fetch(`save_location.php?bus_id=${currentBusId}&lat=${latitude}&lng=${longitude}`);
+        updateMap(latitude, longitude);
+      }, err => {
+        alert("Error getting location");
+      }, { enableHighAccuracy: true });
+    }
+
+    function stopTracking() {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+      document.getElementById("statusMsg").textContent = "Tracking stopped.";
+      tracking = false;
+    }
+
+    let map = L.map('map').setView([10.7905, 78.7047], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    let marker = null;
+
+    function updateMap(lat, lng) {
+      if (marker) map.removeLayer(marker);
+      marker = L.marker([lat, lng]).addTo(map);
+      map.setView([lat, lng], 15);
+    }
+
+    window.onload = loadSources;
+  </script>
+</body>
+</html>

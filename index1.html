@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Live Bus ETA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(to right, #f9f9f9, #e6f0ff);
+      padding: 20px;
+      color: #333;
+    }
+    h2 {
+      text-align: center;
+      color: #2c3e50;
+      font-size: 28px;
+      margin-bottom: 20px;
+    }
+    label {
+      font-weight: 500;
+      display: block;
+      margin: 10px auto 5px;
+      text-align: center;
+    }
+    select, button {
+      display: block;
+      width: 90%;
+      max-width: 400px;
+      margin: 8px auto;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    button {
+      background-color: #3498db;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background-color: #2980b9;
+    }
+    #map {
+      height: 300px;
+      margin: 20px auto;
+      width: 95%;
+      max-width: 900px;
+      border-radius: 10px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+    }
+    table {
+      width: 95%;
+      max-width: 900px;
+      margin: 20px auto;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      overflow: hidden;
+    }
+    th, td {
+      padding: 12px;
+      text-align: center;
+      border-bottom: 1px solid #ddd;
+    }
+    th {
+      background-color: #3498db;
+      color: white;
+    }
+    tr:hover {
+      background-color: #f2f2f2;
+    }
+    .error {
+      color: red;
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Live ETA Tracker</h2>
+
+  <label for="source">Select Source:</label>
+  <select id="source" onchange="loadDestinations()"></select>
+
+  <label for="destination">Select Destination:</label>
+  <select id="destination" onchange="loadBuses()"></select>
+
+  <label for="bus_id">Select Bus:</label>
+  <select id="bus_id"></select>
+
+  <button onclick="loadETA()">Get ETA</button>
+
+  <div id="map"></div>
+
+  <h2>Estimated Arrival Times</h2>
+  <table id="etaTable">
+    <thead>
+      <tr>
+        <th>Stop Name</th>
+        <th>ETA (mins)</th>
+        <th>Departure</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <p id="errorMsg" class="error"></p>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    let lastFetched = 0;
+
+    async function fetchJSON(url) {
+      const res = await fetch(url);
+      return await res.json();
+    }
+
+    async function loadSources() {
+      const stops = await fetchJSON('get_stops_list.php');
+      const sourceSelect = document.getElementById('source');
+      sourceSelect.innerHTML = '<option value="">Select Source</option>';
+      stops.forEach(s => {
+        sourceSelect.innerHTML += `<option value="${s.stop_id}">${s.stop_name}</option>`;
+      });
+    }
+
+    async function loadDestinations() {
+      const sourceId = document.getElementById('source').value;
+      const stops = await fetchJSON(`get_destinations.php?source_id=${sourceId}`);
+      const destSelect = document.getElementById('destination');
+      destSelect.innerHTML = '<option value="">Select Destination</option>';
+      stops.forEach(s => {
+        destSelect.innerHTML += `<option value="${s.stop_id}">${s.stop_name}</option>`;
+      });
+    }
+
+    async function loadBuses() {
+      const source = document.getElementById('source').value;
+      const destination = document.getElementById('destination').value;
+      const buses = await fetchJSON(`get_buses.php?source_id=${source}&destination_id=${destination}`);
+      const busSelect = document.getElementById('bus_id');
+      busSelect.innerHTML = '<option value="">Select Bus</option>';
+      buses.forEach(bus => {
+        busSelect.innerHTML += `<option value="${bus.bus_id}">${bus.bus_name}</option>`;
+      });
+    }
+
+    async function loadETA() {
+      const now = Date.now();
+      if (now - lastFetched < 60000) return alert("Please wait before refreshing again.");
+      lastFetched = now;
+
+      const busId = document.getElementById("bus_id").value;
+      const errorMsg = document.getElementById("errorMsg");
+      errorMsg.textContent = "";
+
+      if (!busId) return alert("Please select a bus");
+
+      try {
+        const gpsData = await fetchJSON(`get_latest_gps.php?bus_id=${busId}`);
+        if (!gpsData || !gpsData.lat || !gpsData.lng) throw new Error("No GPS data available");
+
+        const stops = await fetchJSON(`get_stops.php?bus_id=${busId}`);
+        if (!stops.length) throw new Error("No route or stop data found or bus not scheduled today.");
+
+        const tbody = document.querySelector("#etaTable tbody");
+        tbody.innerHTML = "";
+
+        // 🗺 Replace map with new one
+        if (window.busMap) window.busMap.remove();
+        window.busMap = L.map('map').setView([gpsData.lat, gpsData.lng], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(window.busMap);
+
+        L.marker([gpsData.lat, gpsData.lng])
+          .addTo(window.busMap)
+          .bindPopup("Bus Location")
+          .openPopup();
+
+        for (let stop of stops) {
+          const routeUrl = `https://router.project-osrm.org/route/v1/driving/${gpsData.lng},${gpsData.lat};${stop.longitude},${stop.latitude}?overview=false`;
+          const routeData = await fetchJSON(routeUrl);
+          const duration = routeData.routes?.[0]?.duration || 0;
+          const eta = Math.round(duration / 60);
+
+          const row = `<tr><td>${stop.stop_name}</td><td>${eta} mins</td><td>${stop.estimated_departure || '-'}</td></tr>`;
+          tbody.innerHTML += row;
+
+          window.busMap.circleMarker([stop.latitude, stop.longitude], {
+            radius: 5, color: 'blue'
+          }).addTo(window.busMap).bindPopup(stop.stop_name);
+        }
+      } catch (error) {
+        errorMsg.textContent = error.message;
+      }
+    }
+
+    window.onload = loadSources;
+  </script>
+</body>
+</html>
